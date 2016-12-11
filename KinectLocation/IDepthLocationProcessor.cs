@@ -2,7 +2,7 @@
 using System.ComponentModel;
 using System.Windows.Media;
 
-namespace Microsoft.Samples.Kinect.DepthBasics
+namespace KinectLocation
 {
     public interface IDepthLocationProcessor : INotifyPropertyChanged, IDisposable
     {
@@ -17,5 +17,9 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         ImageSource VisualizationDownsampled { get; set; }
 
         ImageSource VisualizationLoiPoints { get; set; }
+
+        int FrameWidth { get; set; }
+
+        int FrameHeight { get; set; }
     }
 }

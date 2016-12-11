@@ -10,9 +10,9 @@ using Emgu.CV;
 using Emgu.CV.CvEnum;
 using Emgu.CV.Structure;
 using Emgu.CV.Util;
-using Microsoft.Samples.Kinect.DepthBasics.Annotations;
+using KinectLocation.Annotations;
 
-namespace Microsoft.Samples.Kinect.DepthBasics
+namespace KinectLocation
 {
     public abstract class DepthLocationProcessor : IDepthLocationProcessor
     {
@@ -81,8 +81,9 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 using (var hierachy = new Mat())
                 using (var contours = new VectorOfVectorOfPoint())
                 using (var downsampled = changesImage
+                    .ThresholdBinary(new Gray(5), new Gray(255))
                     .PyrDown()
-                    .SmoothBlur(10, 10)
+                    .SmoothBlur(15, 15)
                     .PyrUp()
                     .ThresholdBinary(new Gray(5), new Gray(255))
                     .Erode(2))
@@ -111,8 +112,13 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                     foreach (var rect in rects)
                     {
                         // Ignore small rectangles
-                        if (rect.BoundingBox.Width < 10 &&
-                            rect.BoundingBox.Height < 10)
+                        if (rect.BoundingBox.Width < 20 &&
+                            rect.BoundingBox.Height < 20)
+                            continue;
+
+                        // Ignore edge rectangles
+                        if (rect.BoundingBox.Y < 10 ||
+                            rect.BoundingBox.X < 10)
                             continue;
 
                         // Calculate center of contour
@@ -152,17 +158,17 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                             // Apply contour and movement mask
                             using (var contourFloodBound = contourFlood.Copy(rect.BoundingBox))
                             using (var contourCannyBound = contourCanny.Copy(contourFloodBound))
-                            using (var maskMask = changesImage.Copy(rect.BoundingBox))
+                            using (var maskMask = changesImage.Copy(rect.BoundingBox).ThresholdBinary(new Gray(20), new Gray(255)))
                             using (var contourCannyMaskedBound = contourCannyBound.Copy(maskMask))
                             {
                                 // Find min depth point of contour canny
                                 var contourMinDepth =
-                                    contourCannyMaskedBound.Bytes.Min(b => b > 70 ? b : (byte)255);
+                                    contourCannyMaskedBound.Bytes.Min(b => b > 20 ? b : (byte)255);
 
                                 // Save the location with depth data
                                 var loiPoint = new LoiPoint(contourCenter, contourMinDepth);
                                 loiPoints.Add(loiPoint);
-
+                                
                                 // Visualize LoI point
                                 if (this.IsVisualizationLoiPointsEnabled)
                                     this.VisualizeLoiPoint(contourCannyMaskedBound, rect, loiPoint);
@@ -244,7 +250,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
             {
                 // Visualize contours and draw bounding rectangles
                 CvInvoke.DrawContours(cvImage, mcvContours, -1, new MCvScalar(255));
-                foreach (var contour in contoursList)
+                foreach (var contour in contoursList.Where(c => c.BoundingBox.Width > 20 && c.BoundingBox.Height > 20))
                     CvInvoke.Rectangle(cvImage, contour.BoundingBox, new MCvScalar(255));
 
                 // Show image
@@ -274,9 +280,9 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 .Select(contour => new CvContour(contour));
         }
 
-        protected int FrameWidth { get; set; }
-
-        protected int FrameHeight { get; set; }
+        public int FrameWidth { get; set; }
+        
+        public int FrameHeight { get; set; }
 
         public bool IsVisualizationContoursEnabled { get; set; }
 

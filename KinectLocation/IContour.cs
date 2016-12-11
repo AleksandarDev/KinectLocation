@@ -1,6 +1,6 @@
 ﻿using System.Drawing;
 
-namespace Microsoft.Samples.Kinect.DepthBasics
+namespace KinectLocation
 {
     public interface IContour
     {

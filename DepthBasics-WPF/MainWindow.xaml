@@ -7,6 +7,7 @@
     </Window.Resources>
     <Grid Margin="10 0 10 0">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -17,27 +18,25 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Viewbox Grid.Row="0" Grid.Column="0" HorizontalAlignment="Center">
+        <TextBlock x:Name="LocationIdTextBlock" FontSize="48" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Margin="24 12"></TextBlock>
+        
+        <Viewbox Grid.Row="1" Grid.Column="0" HorizontalAlignment="Center">
             <Image x:Name="CvImageContainer1" Stretch="UniformToFill" />
         </Viewbox>
-        <Viewbox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center">
+        <Viewbox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Center">
             <Image x:Name="CvImageContainer2" Stretch="UniformToFill" />
         </Viewbox>
-        <Viewbox Grid.Row="0" Grid.Column="2" HorizontalAlignment="Stretch">
+        <Viewbox Grid.Row="1" Grid.Column="2" HorizontalAlignment="Stretch">
             <Image x:Name="CvImageContainer3" Stretch="Fill" />
         </Viewbox>
-        <Viewbox Grid.Row="1" Grid.Column="0" HorizontalAlignment="Stretch">
+        <Viewbox Grid.Row="2" Grid.Column="0" HorizontalAlignment="Stretch">
             <Image x:Name="CvImageContainer4" Stretch="Fill" />
         </Viewbox>
-        <Viewbox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch">
+        <Viewbox Grid.Row="2" Grid.Column="1" HorizontalAlignment="Stretch">
             <Image x:Name="CvImageContainer5" Stretch="Fill" />
         </Viewbox>
-        <Viewbox Grid.Row="1" Grid.Column="2" HorizontalAlignment="Stretch">
+        <Viewbox Grid.Row="2" Grid.Column="2" HorizontalAlignment="Stretch">
             <Image x:Name="CvImageContainer6" Stretch="Fill" />
         </Viewbox>
-
-        <StatusBar Grid.Row="2" Grid.ColumnSpan="3" HorizontalAlignment="Stretch" Name="statusBar" VerticalAlignment="Bottom" Background="White">
-            <StatusBarItem Content="{Binding StatusText}" />
-        </StatusBar>
     </Grid>
 </Window>

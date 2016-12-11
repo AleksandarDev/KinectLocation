@@ -5,7 +5,7 @@ using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using Emgu.CV;
 
-namespace Microsoft.Samples.Kinect.DepthBasics
+namespace KinectLocation
 {
     /// <summary>
     /// The <see cref="IImage"/> extensions.

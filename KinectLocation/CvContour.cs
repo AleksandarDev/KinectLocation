@@ -2,7 +2,7 @@
 using Emgu.CV;
 using Emgu.CV.Util;
 
-namespace Microsoft.Samples.Kinect.DepthBasics
+namespace KinectLocation
 {
     public class CvContour : Contour
     {

@@ -1,4 +1,4 @@
-﻿namespace Microsoft.Samples.Kinect.DepthBasics
+﻿namespace KinectLocation
 {
     public class LoiPoint : ILoiPoint
     {

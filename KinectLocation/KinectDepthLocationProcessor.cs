@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Threading.Tasks;
 using System.Windows.Media;
+using KinectLocation.Annotations;
 using Microsoft.Kinect;
-using Microsoft.Samples.Kinect.DepthBasics.Annotations;
 
-namespace Microsoft.Samples.Kinect.DepthBasics
+namespace KinectLocation
 {
     public class KinectDepthLocationProcessor : DepthLocationProcessor, IKinectDepthLocationProcessor
     {
@@ -19,7 +19,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
 
         private ImageSource visualizationDepthImage;
         private byte[] depthData;
-
+        private bool isProcessing;
 
         public KinectDepthLocationProcessor([NotNull] ILocationHandler locationHandler) : base(locationHandler)
         {
@@ -59,37 +59,49 @@ namespace Microsoft.Samples.Kinect.DepthBasics
             if (this.frameDescription == null)
                 return;
 
+            // Ignore if already processing
+            if (this.isProcessing)
+                return;
+            this.isProcessing = true;
+
             // Process frame
-            using (var depthFrame = e.FrameReference.AcquireFrame())
+            try
             {
-                if (depthFrame == null)
-                    return;
-
-                // The fastest way to process the body index data is to directly access 
-                // the underlying buffer
-                using (var depthBuffer = depthFrame.LockImageBuffer())
+                using (var depthFrame = e.FrameReference.AcquireFrame())
                 {
-                    // verify data and write the color data to the display bitmap
-                    if (this.frameDescription.Width * this.frameDescription.Height ==
-                        depthBuffer.Size / this.frameDescription.BytesPerPixel)
+                    if (depthFrame == null)
+                        return;
+
+                    // The fastest way to process the body index data is to directly access 
+                    // the underlying buffer
+                    using (var depthBuffer = depthFrame.LockImageBuffer())
                     {
-                        // Note: In order to see the full range of depth (including the less reliable far field depth)
-                        // we are setting maxDepth to the extreme potential depth threshold
-                        const ushort maxDepth = ushort.MaxValue;
-                        this.FillDepthData(
-                            depthBuffer.UnderlyingBuffer,
-                            depthBuffer.Size,
-                            depthFrame.DepthMinReliableDistance,
-                            maxDepth);
+                        // verify data and write the color data to the display bitmap
+                        if (this.frameDescription.Width * this.frameDescription.Height ==
+                            depthBuffer.Size / this.frameDescription.BytesPerPixel)
+                        {
+                            // Note: In order to see the full range of depth (including the less reliable far field depth)
+                            // we are setting maxDepth to the extreme potential depth threshold
+                            const ushort maxDepth = ushort.MaxValue;
+                            this.FillDepthData(
+                                depthBuffer.UnderlyingBuffer,
+                                depthBuffer.Size,
+                                depthFrame.DepthMinReliableDistance,
+                                maxDepth);
 
-                        // Visualize depth frame
-                        if (this.IsVisualizationDepthImageEnabled)
-                            this.VisualizeDepthImage();
+                            // Visualize depth frame
+                            if (this.IsVisualizationDepthImageEnabled)
+                                this.VisualizeDepthImage();
 
-                        // Pass to implemented class (depth processor)
-                        this.ProcessDepthFrame(this.depthData);
+                            // Pass to implemented class (depth processor)
+                            this.ProcessDepthFrame(this.depthData);
+                        }
                     }
                 }
+            }
+            finally
+            {
+                this.isProcessing = false;
             }
         }
 
@@ -133,6 +145,8 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 this.OnPropertyChanged();
             }
         }
+
+        public byte[] DepthData => this.depthData;
 
         #region IDisposable implementation
 

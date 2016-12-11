@@ -1,54 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Drawing;
+using System.Linq;
 using System.Windows.Media.Imaging;
-using Microsoft.Kinect;
-using PointF = System.Drawing.PointF;
+using KinectLocation;
 
 namespace Microsoft.Samples.Kinect.DepthBasics
 {
-    public class LocationHandler : ILocationHandler
-    {
-        private bool CheckInBox(
-            RectF nearBox, float nearBoxDepth, 
-            RectF farBox, float farBoxDepth, 
-            PointF location, float depth)
-        {
-            if (depth < nearBoxDepth ||
-                depth > farBoxDepth)
-                return false;
-
-            var depthKey = (depth - nearBoxDepth) / (farBoxDepth - nearBoxDepth);
-
-            var nXl = nearBox.X;
-            var nXr = nearBox.X + nearBox.Width;
-            var nYu = nearBox.Y;
-            var nYl = nearBox.Y + nearBox.Height;
-
-            var fXl = farBox.X;
-            var fXr = farBox.X + farBox.Width;
-            var fYu = farBox.Y;
-            var fYl = farBox.Y + farBox.Height;
-
-            // (f-n)*d
-            var pXl = nXl + (fXl - nXl) * depthKey;
-            var pXr = nXr + (fXr - nXr) * depthKey;
-            var pYu = nYu + (fYu - nYu) * depthKey;
-            var pYl = nYl + (fYl - nYl) * depthKey;
-
-            // Check if in the box
-            if (location.X >= pXl && location.X <= pXr &&
-                location.Y >= pYu && location.Y <= pYl)
-                return true;
-            return false;
-        }
-
-        public void ProcessRawLoiPoints(IEnumerable<ILoiPoint> points)
-        {
-            
-        }
-    }
-
     /// <summary>
     /// Interaction logic for MainWindow
     /// </summary>
@@ -76,7 +35,17 @@ namespace Microsoft.Samples.Kinect.DepthBasics
             // initialize the components (controls) of the window
             this.InitializeComponent();
 
-            this.locationHandler = new LocationHandler();
+            this.locationHandler = new LocationHandlerDepthVisualizer();
+            this.locationHandler.RegisterVolume(new VoiBox(
+                "In Kitchen", 0, 0, 255, new Size(190, 800), 90));
+            this.locationHandler.RegisterVolume(new VoiBox(
+                "In Hall", 190, 0, 255, new Size(90, 800), 90));
+            this.locationHandler.RegisterVolume(new VoiBox(
+                "In Bedroom", 270, 0, 190, new Size(90, 800), 40));
+            this.locationHandler.RegisterVolume(new VoiBox(
+                "In Livingroom", 0, 0, 150, new Size(400, 800), 130));
+            this.locationHandler.OnLocations+= LocationHandlerOnOnLocations;
+
             this.kinectDepthLocationProcessor = new KinectDepthLocationProcessor(this.locationHandler);
             this.kinectDepthLocationProcessor.Start();
             this.kinectDepthLocationProcessor.IsVisualizationDepthImageEnabled = true;
@@ -84,6 +53,32 @@ namespace Microsoft.Samples.Kinect.DepthBasics
             this.kinectDepthLocationProcessor.IsVisualizationContoursEnabled = true;
             this.kinectDepthLocationProcessor.IsVisualizationLoiPointsEnabled = true;
             this.kinectDepthLocationProcessor.PropertyChanged += KinectDepthLocationProcessorOnPropertyChanged;
+        }
+
+        private int lastLocationsPointer = 0;
+        private string[] lastLocations = new string[8];
+
+        private void LocationHandlerOnOnLocations(object sender, LocationHandlerLocationAvailableEventArgs args)
+        {
+            var locationsList = args.Locations.ToList();
+            var invalidLocations = locationsList.Where(l => l.Point.Location.X < 10 || l.Point.Location.Y < 10 || l.Point.Depth > 254).ToList();
+            invalidLocations.ForEach(l => locationsList.Remove(l));
+
+            if (!locationsList.Any())
+                return;
+
+            foreach (var loi in locationsList)
+            {
+                this.lastLocations[this.lastLocationsPointer++] = loi.Id;
+                this.lastLocationsPointer = this.lastLocationsPointer % this.lastLocations.Length;
+            }
+
+            var location = lastLocations.GroupBy(l => l).OrderByDescending(g => g.Count()).FirstOrDefault();
+            this.LocationIdTextBlock.Text = location?.Key;
+            //this.LocationIdTextBlock.Text = locationsList
+            //    .Select(l => l.Id)
+            //    .Distinct()
+            //    .Aggregate(string.Empty, (c, s) => c + ", " + s);
         }
 
         private void KinectDepthLocationProcessorOnPropertyChanged(object sender, PropertyChangedEventArgs propertyChangedEventArgs)
@@ -101,6 +96,9 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         private void RefreshDepthImage()
         {
             this.CvImageContainer1.Source = this.kinectDepthLocationProcessor.VisualizationDepthImage;
+
+            //this.CvImageContainer5.Source = (this.locationHandler as LocationHandlerDepthVisualizer).VisualizeLocations(
+            //    this.kinectDepthLocationProcessor.DepthData, this.kinectDepthLocationProcessor.FrameWidth).ToBitmapSource();
         }
 
         private void RefreshDownsampledImage()
