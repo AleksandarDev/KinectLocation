@@ -179,7 +179,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
 
         private void VisualizeDownsampled(IImage downsampled)
         {
-            this.visualizationDownsampled = downsampled.ToBitmapSource();
+            this.VisualizationDownsampled = downsampled.ToBitmapSource();
         }
 
         private void VisualizeLoiPoint(Image<Gray, byte> contourCanny, IContour rect, LoiPoint loiPoint)

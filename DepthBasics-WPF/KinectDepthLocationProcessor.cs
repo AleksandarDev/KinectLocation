@@ -26,6 +26,11 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         }
 
 
+        public void Start()
+        {
+            this.Initialize();
+        }
+
         protected void Initialize()
         {
             this.kinectSensor = KinectSensor.GetDefault();
@@ -66,9 +71,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 {
                     // verify data and write the color data to the display bitmap
                     if (this.frameDescription.Width * this.frameDescription.Height ==
-                        depthBuffer.Size / this.frameDescription.BytesPerPixel &&
-                        this.frameDescription.Width == this.frameDescription.Height &&
-                        this.frameDescription.Height == this.frameDescription.Width)
+                        depthBuffer.Size / this.frameDescription.BytesPerPixel)
                     {
                         // Note: In order to see the full range of depth (including the less reliable far field depth)
                         // we are setting maxDepth to the extreme potential depth threshold

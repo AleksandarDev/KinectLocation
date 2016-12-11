@@ -8,5 +8,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         bool IsVisualizationDepthImageEnabled { get; set; }
 
         ImageSource VisualizationDepthImage { get; set; }
+
+        void Start();
     }
 }
