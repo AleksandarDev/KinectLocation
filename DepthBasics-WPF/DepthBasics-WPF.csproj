@@ -129,6 +129,10 @@
       <DependentUpon>App.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="Contour.cs" />
+    <Compile Include="CvContour.cs" />
+    <Compile Include="IContour.cs" />
+    <Compile Include="LoiPoint.cs" />
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
       <SubType>Code</SubType>

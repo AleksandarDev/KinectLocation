@@ -9,7 +9,7 @@ using System.Drawing;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-using System.Windows.Documents;
+using System.Windows.Interop;
 using Emgu.CV;
 using Emgu.CV.CvEnum;
 using Emgu.CV.Structure;
@@ -19,9 +19,6 @@ namespace Microsoft.Samples.Kinect.DepthBasics
 {
     using System;
     using System.ComponentModel;
-    using System.Diagnostics;
-    using System.Globalization;
-    using System.IO;
     using System.Windows;
     using System.Windows.Media;
     using System.Windows.Media.Imaging;
@@ -252,10 +249,11 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         /// <param name="depthFrameDataSize">Size of the DepthFrame image data</param>
         /// <param name="minDepth">The minimum reliable depth value for the frame</param>
         /// <param name="maxDepth">The maximum reliable depth value for the frame</param>
-        private unsafe void ProcessDepthFrameData(IntPtr depthFrameData, uint depthFrameDataSize, ushort minDepth, ushort maxDepth)
+        private unsafe void ProcessDepthFrameData(IntPtr depthFrameData, uint depthFrameDataSize, ushort minDepth,
+            ushort maxDepth)
         {
             // depth frame data is a 16 bit value
-            ushort* frameData = (ushort*)depthFrameData;
+            ushort* frameData = (ushort*) depthFrameData;
 
             // convert depth to a visual representation
             Parallel.For(0, (int) (depthFrameDataSize / this.depthFrameDescription.BytesPerPixel), i =>
@@ -273,7 +271,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 const int noiseRemovalThr = 5;
                 if (depthFilled > 2 &&
                     newValue < noiseRemovalThr && this.depthMovementPixels[i] > noiseRemovalThr)
-                    newValue = (byte)this.depthMovementPixels[i];
+                    newValue = (byte) this.depthMovementPixels[i];
 
                 // Filter out static objects
                 Func<byte, byte, bool> compareFrameDepth =
@@ -281,7 +279,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                     {
                         return Math.Abs(d1 - d2) <= 3;
                     };
-                if (this.depthFilled > depthHistorySize*10)
+                if (this.depthFilled > depthHistorySize * 10)
                 {
                     var argument = true;
                     argument &= compareFrameDepth(this.depthMovementPixels[i], newValue);
@@ -302,220 +300,228 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 this.depthMovementPixels[i] = newValue;
             });
 
-
-            using (Image<Gray, byte> depthImage = new Image<Gray, byte>(
-                this.depthFrameDescription.Width,
-                this.depthFrameDescription.Height))
+            DateTime start = DateTime.Now;
+            
+            // Extract LoI points from new frame
+            using (var depthImage = this.GetFilledFullSize(maskBytes))
+            using (var downsampled = depthImage
+                .PyrDown()
+                .SmoothBlur(10, 10)
+                .PyrUp()
+                .ThresholdToZero(new Gray(50))
+                .Erode(3))
             {
-                depthImage.Bytes = maskBytes;
+                // Visualize downsampled image
+                if (isVisualizationDownsampledEnabled)
+                    this.VisualizeDownsampled(downsampled);
 
-                using (var blur = depthImage.PyrDown().SmoothBlur(10, 10).PyrUp())
+                // Extract countours
+                var hierachy = new Mat();
+                var contours = new VectorOfVectorOfPoint();
+                CvInvoke.FindContours(
+                    downsampled,
+                    contours,
+                    hierachy,
+                    RetrType.External,
+                    ChainApproxMethod.ChainApproxSimple);
+
+                // Cast to CvContours
+                var rects = ToCvContour(contours).ToList();
+
+                // Visualize contours
+                if (isVisualizeContoursEnabled)
+                    this.VisualizeContours(rects);
+
+                // Retrieve locations of interest points
+                var loiPoints = new List<LoiPoint>();
+                foreach (var rect in rects)
                 {
-                    using (var thr = blur.ThresholdToZero(new Gray(50)))
+                    // Calculate center of contour
+                    var moments = CvInvoke.Moments(new VectorOfPoint(rect.Points));
+                    var x = moments.M10 / moments.M00;
+                    var y = moments.M01 / moments.M00;
+                    var contourCenter = new System.Drawing.Point((int)x, (int)y);
+
+                    // Ignore contours out of rect
+                    if (contourCenter.X <= rect.BoundingBox.Left ||
+                        contourCenter.Y <= rect.BoundingBox.Top ||
+                        contourCenter.X >= rect.BoundingBox.Right ||
+                        contourCenter.Y >= rect.BoundingBox.Bottom)
+                        continue;
+
+                    // Fill the contour and apply the contour mask to the depth image
+                    using (var contourCannyFull = this.GetFilledFullSize(this.depthMovementPixels))
+                    using (var contourCanny = contourCannyFull.Copy(rect.BoundingBox))
+                    using (var contourFlood = this.GetEmptyFullSize())
+                    using (var contourFloodMask = this.GetEmptyFullSize(2, 2))
                     {
-                        using (var edge = thr.Canny(1, 1))
+                        Rectangle contourFloodRect;
+                        CvInvoke.DrawContours(
+                            contourFlood,
+                            new VectorOfVectorOfPoint(new VectorOfPoint(rect.Points)),
+                            -1,
+                            new MCvScalar(255));
+                        CvInvoke.FloodFill(
+                            contourFlood,
+                            contourFloodMask,
+                            contourCenter,
+                            new MCvScalar(255),
+                            out contourFloodRect,
+                            new MCvScalar(0),
+                            new MCvScalar(0));
+
+                        // Apply contour and movement mask
+                        using (var contourFloodBound = contourFlood.Copy(rect.BoundingBox))
+                        using (var contourCannyBound = contourCanny.Copy(contourFloodBound))
+                        using (var maskMask = depthImage.Copy(rect.BoundingBox))
+                        using (var contourCannyMaskedBound = contourCannyBound.Copy(maskMask))
                         {
-                            Mat hierachy = new Mat();
-                            VectorOfVectorOfPoint contours = new VectorOfVectorOfPoint();
+                            // Find min depth point of contour canny
+                            var contourMinDepth =
+                                contourCannyMaskedBound.Bytes.Min(b => b > 70 ? b : (byte)255);
 
-                            Image<Gray, byte> eroded = new Image<Gray, byte>(this.depthFrameDescription.Width,
-                                this.depthFrameDescription.Height);
-                            CvInvoke.Erode(thr, eroded, new Mat(), new System.Drawing.Point(-1, -1), 3, BorderType.Default, new MCvScalar(255));
+                            // Save the location with depth data
+                            var loiPoint = new LoiPoint(contourCenter, contourMinDepth);
+                            loiPoints.Add(loiPoint);
 
-                            this.depthCvBitmap = ToBitmapSource(eroded);
-                            this.CvImageContainer.Source = this.depthCvBitmap;
-
-                            CvInvoke.FindContours(eroded, contours, hierachy, RetrType.External, ChainApproxMethod.ChainApproxSimple);
-
-                            using (Image<Gray, byte> cvImage = new Image<Gray, byte>(
-                                this.depthFrameDescription.Width,
-                                this.depthFrameDescription.Height))
-                            {
-                                var rects = new List<Tuple<Rectangle, List<System.Drawing.PointF>>>();
-                                foreach (var contour in contours.ToArrayOfArray())
-                                {
-                                    var contourF = contour.Select(p => new System.Drawing.PointF(p.X, p.Y)).ToArray();
-                                    var rect = Emgu.CV.PointCollection.BoundingRectangle(contourF);
-
-                                    // Remove small rects
-                                    const int minRectSizePass1 = 30;
-                                    if (rect.Width < minRectSizePass1 && rect.Height < minRectSizePass1)
-                                        continue;
-
-                                    rects.Add(new Tuple<Rectangle, List<System.Drawing.PointF>>(rect, contourF.ToList()));
-                                }
-
-                                CvInvoke.DrawContours(cvImage, contours, -1, new MCvScalar(255));
-
-                                foreach (var tuple in rects)
-                                {
-                                    CvInvoke.Rectangle(cvImage, tuple.Item1, new MCvScalar(255), 1);
-                                }
-
-                                // Remove small rects
-                                const int minRectSize = 10;
-                                rects = rects.Where(r => r.Item1.Width > minRectSize && r.Item1.Height > minRectSize).ToList();
-
-                                using (var floodSource = new Image<Gray, byte>(this.depthFrameDescription.Width,
-                                    this.depthFrameDescription.Height))
-                                {
-                                    floodSource.Bytes = this.depthMovementPixels;
-                                    using (var floodSourceCopy = floodSource.Copy())
-                                    {
-                                        var loiPoints = new List<LoiPoint>();
-
-                                        foreach (var rect in rects)
-                                        {
-                                            var moments = CvInvoke.Moments(new VectorOfPointF(rect.Item2.ToArray()),
-                                                false);
-                                            var x = moments.M10 / moments.M00;
-                                            var y = moments.M01 / moments.M00;
-                                            var contourCenter = new System.Drawing.Point((int) x, (int) y);
-
-                                            var rectCenter = new System.Drawing.Point(
-                                                rect.Item1.X + rect.Item1.Width / 2,
-                                                rect.Item1.Y + rect.Item1.Height / 2);
-
-                                            // Ignore contours out of rect
-                                            if (contourCenter.X <= rect.Item1.Left ||
-                                                contourCenter.Y <= rect.Item1.Top ||
-                                                contourCenter.X >= rect.Item1.Right ||
-                                                contourCenter.Y >= rect.Item1.Bottom)
-                                                continue;
-
-                                            // Ignore contours out of image
-                                            if (contourCenter.X < 0 || 
-                                                contourCenter.Y < 0 ||
-                                                contourCenter.X >= floodSourceCopy.Width ||
-                                                contourCenter.Y >= floodSourceCopy.Height)
-                                                continue;
-
-                                            var contourCanny = new Image<Gray, byte>(
-                                                this.depthFrameDescription.Width,
-                                                this.depthFrameDescription.Height);
-                                            contourCanny.Bytes = this.depthMovementPixels;
-                                            contourCanny = contourCanny.Copy(rect.Item1);
-
-                                            Rectangle contourFloodRect;
-                                            var contourFlood = new Image<Gray, byte>(
-                                                this.depthFrameDescription.Width,
-                                                this.depthFrameDescription.Height);
-                                            var contourFloodMask = new Image<Gray, byte>(
-                                                this.depthFrameDescription.Width + 2,
-                                                this.depthFrameDescription.Height + 2);
-                                            CvInvoke.DrawContours(
-                                                contourFlood,
-                                                new VectorOfVectorOfPoint(new[]
-                                                {
-                                                    rect.Item2.Select(
-                                                        p => new System.Drawing.Point((int) p.X, (int) p.Y)).ToArray()
-                                                }),
-                                                -1,
-                                                new MCvScalar(255));
-                                            CvInvoke.FloodFill(
-                                                contourFlood,
-                                                contourFloodMask,
-                                                contourCenter,
-                                                new MCvScalar(255),
-                                                out contourFloodRect,
-                                                new MCvScalar(0),
-                                                new MCvScalar(0));
-                                            contourFlood = contourFlood.Copy(rect.Item1);
-
-                                            contourCanny = contourCanny.Copy(contourFlood);
-
-                                            var maskMask = depthImage.Copy(rect.Item1);
-
-                                            contourCanny = contourCanny.Copy(maskMask);
-
-                                            // Find min depth point of contour canny
-                                            var contourMinDepthPixelPoint = new System.Drawing.Point();
-                                            var contourMinDepth = contourCanny.Bytes.Min(b => b > 70 ? b : (byte) 255);
-                                            for (var i = 0; i < contourCanny.Height; i++)
-                                            {
-                                                var found = false;
-                                                for (int j = 0; j < contourCanny.Width; j++)
-                                                {
-                                                    if (contourCanny.Data[i,j,0] == contourMinDepth)
-                                                    {
-                                                        contourMinDepthPixelPoint = new System.Drawing.Point(j, i);
-                                                        found = true;
-                                                        break;
-                                                    }
-                                                }
-                                                if (found) break;
-                                            }
-
-                                            // Transform min depth point of contour to full image point
-                                            var contourDepthPoint = new System.Drawing.Point(
-                                                (contourMinDepthPixelPoint.X + rect.Item1.X),
-                                                (contourMinDepthPixelPoint.Y + rect.Item1.Y));
-
-                                            // Flood the rect near min depth point inside contour
-                                            var floodRectMask = new Image<Gray, byte>(
-                                                this.depthFrameDescription.Width + 2,
-                                                this.depthFrameDescription.Height + 2);
-                                            Rectangle floodRect;
-                                            CvInvoke.Rectangle(floodSourceCopy, rect.Item1, new MCvScalar(0), 1);
-                                            CvInvoke.FloodFill(
-                                                floodSourceCopy, floodRectMask,
-                                                contourDepthPoint,
-                                                new MCvScalar(255), out floodRect, new MCvScalar(1),
-                                                new MCvScalar(1));
-
-                                            // Save the location with depth data
-                                            loiPoints.Add(new LoiPoint(contourCenter, contourMinDepth));
-                                        }
-
-                                        this.ProcessRawLocationsOfInterest(loiPoints);
-
-                                        this.depthCvBitmap1 = ToBitmapSource(cvImage);
-                                        this.CvImageContainer1.Source = this.depthCvBitmap1;
-
-                                        this.depthCvBitmap2 = ToBitmapSource(floodSourceCopy);
-                                        this.CvImageContainer2.Source = this.depthCvBitmap2;
-                                    }
-                                }
-                            }
+                            // Visualize LoI point
+                            if (isVisualizationLoiPointEnabled)
+                                this.VisualizeLoiPoint(contourCannyMaskedBound, rect, loiPoint);
                         }
+
                     }
+
+                    this.ProcessRawLocationsOfInterest(loiPoints);
                 }
             }
 
+            System.Diagnostics.Debug.WriteLine(DateTime.Now - start);
 
             this.depthFilled++;
         }
 
-        public class LoiPoint
+        private bool isVisualizationDownsampledEnabled = false;
+        private bool isVisualizationLoiPointEnabled = false;
+        private bool isVisualizeContoursEnabled = false;
+
+        private void VisualizeDownsampled(Image<Gray, byte> downsampled)
         {
-            public LoiPoint(System.Drawing.Point location, byte depth)
+            this.depthCvBitmap = ToBitmapSource(downsampled);
+            this.CvImageContainer.Source = this.depthCvBitmap;
+        }
+
+        private void VisualizeLoiPoint(Image<Gray, byte> contourCanny, IContour rect, LoiPoint loiPoint)
+        {
+            // Find first pixel in contour that matches LoI point depth
+            System.Drawing.Point? contourMinDepthPixelPoint = null;
+            for (var i = 1; i < contourCanny.Height; i++)
             {
-                this.Location = location;
-                this.Depth = depth;
+                for (var j = 1; j < contourCanny.Width; j++)
+                {
+                    // Ignore if point mot of required depth
+                    if (contourCanny.Data[i, j, 0] != loiPoint.Depth)
+                        continue;
+
+                    contourMinDepthPixelPoint = new System.Drawing.Point(j, i);
+                    break;
+                }
+
+                // Break if found the point
+                if (contourMinDepthPixelPoint != null)
+                    break;
             }
 
+            // Ignore if point not founc
+            if (contourMinDepthPixelPoint == null)
+                return;
 
-            public System.Drawing.Point Location { get; set; }
+            // Transform min depth point of contour to full image point
+            var contourDepthPoint = new System.Drawing.Point(
+                contourMinDepthPixelPoint.Value.X + rect.BoundingBox.X,
+                contourMinDepthPixelPoint.Value.Y + rect.BoundingBox.Y);
 
-            public byte Depth { get; set; }
+            // Flood the rect near min depth point inside contour
+            using (var depthMovementImage = this.GetFilledFullSize(this.depthMovementPixels))
+            using (var floodRectMask = new Image<Gray, byte>(
+                this.depthFrameDescription.Width + 2,
+                this.depthFrameDescription.Height + 2))
+            {
+                Rectangle floodRect;
+                CvInvoke.Rectangle(depthMovementImage, rect.BoundingBox, new MCvScalar(0));
+                CvInvoke.FloodFill(
+                    depthMovementImage, 
+                    floodRectMask,
+                    contourDepthPoint,
+                    new MCvScalar(255), 
+                    out floodRect, 
+                    new MCvScalar(1),
+                    new MCvScalar(1));
+                CvInvoke.Rectangle(depthMovementImage, rect.BoundingBox, new MCvScalar(0));
+
+
+                this.depthCvBitmap2 = ToBitmapSource(depthMovementImage);
+                this.CvImageContainer2.Source = this.depthCvBitmap2;
+            }
+        }
+
+        private void VisualizeContours(IEnumerable<IContour> contours)
+        {
+            if (contours == null) return;
+            var contoursList = contours as IList<IContour> ?? contours.ToList();
+
+            using (var cvImage = this.GetEmptyFullSize())
+            {
+                // Visualize contours and draw bounding rectangles
+                CvInvoke.DrawContours(cvImage, new VectorOfVectorOfPoint(contoursList.Select(c => c.Points).ToArray()), -1, new MCvScalar(255));
+                foreach (var contour in contoursList)
+                    CvInvoke.Rectangle(cvImage, contour.BoundingBox, new MCvScalar(255));
+
+                // Show image
+                this.depthCvBitmap1 = ToBitmapSource(cvImage);
+                this.CvImageContainer1.Source = this.depthCvBitmap1;
+            }
+        }
+
+
+        private static IEnumerable<CvContour> ToCvContour(VectorOfVectorOfPoint contours)
+        {
+            // Determine contours bounding rectangles
+            return contours
+                .ToArrayOfArray()
+                .Select(contour => new CvContour(contour));
         }
 
         public void ProcessRawLocationsOfInterest(IEnumerable<LoiPoint> locations)
         {
-            
+            foreach (var location in locations)
+                System.Diagnostics.Debug.WriteLine($"Got LoI: {location.Location} ({location.Depth})");
+        }
+
+        private Image<Gray, byte> GetFilledFullSize(byte[] data)
+        {
+            var image = this.GetEmptyFullSize();
+            image.Bytes = data;
+            return image;
+        }
+
+        private Image<Gray, byte> GetEmptyFullSize(int sizeWidthOffset = 0, int sizeHeightOffset = 0)
+        {
+            return new Image<Gray, byte>(
+                this.depthFrameDescription.Width + sizeWidthOffset,
+                this.depthFrameDescription.Height + sizeHeightOffset);
         }
 
         public static BitmapSource ToBitmapSource(IImage image)
         {
-            using (System.Drawing.Bitmap source = image.Bitmap)
+            using (var source = image.Bitmap)
             {
-                IntPtr ptr = source.GetHbitmap(); //obtain the Hbitmap
+                var ptr = source.GetHbitmap(); //obtain the Hbitmap
 
-                BitmapSource bs = System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
+                var bs = Imaging.CreateBitmapSourceFromHBitmap(
                     ptr,
                     IntPtr.Zero,
                     Int32Rect.Empty,
-                    System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
+                    BitmapSizeOptions.FromEmptyOptions());
 
                 DeleteObject(ptr); //release the HBitmap
                 return bs;
