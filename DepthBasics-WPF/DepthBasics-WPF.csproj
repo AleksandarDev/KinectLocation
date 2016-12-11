@@ -131,8 +131,14 @@
     </Compile>
     <Compile Include="Contour.cs" />
     <Compile Include="CvContour.cs" />
+    <Compile Include="DepthLocationProcessor.cs" />
     <Compile Include="IContour.cs" />
+    <Compile Include="IDepthLocationProcessor.cs" />
+    <Compile Include="IImageExtensions.cs" />
+    <Compile Include="IKinectDepthLocationProcessor.cs" />
+    <Compile Include="ILocationHandler.cs" />
     <Compile Include="ILoiPoint.cs" />
+    <Compile Include="KinectDepthLocationProcessor.cs" />
     <Compile Include="LoiPoint.cs" />
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
@@ -140,6 +146,7 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Properties\Annotations.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
       <SubType>Code</SubType>
     </Compile>
