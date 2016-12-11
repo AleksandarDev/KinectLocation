@@ -1,0 +1,44 @@
+﻿<Window x:Class="Microsoft.Samples.Kinect.DepthBasics.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Depth Basics" 
+        Height="600" Width="700" 
+        Closing="MainWindow_Closing">
+    <Window.Resources>
+    </Window.Resources>
+    <Grid Margin="10 0 10 0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Viewbox Grid.Row="0" Grid.Column="0" HorizontalAlignment="Center">
+            <Image Source="{Binding DepthImageSource}" Stretch="UniformToFill" />
+        </Viewbox>
+        <Viewbox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center">
+            <Image Source="{Binding ImageSource}" Stretch="UniformToFill" />
+        </Viewbox>
+        <Viewbox Grid.Row="0" Grid.Column="2" HorizontalAlignment="Stretch">
+            <Image x:Name="CvImageContainer" Stretch="Fill" />
+        </Viewbox>
+        <Viewbox Grid.Row="1" Grid.Column="0" HorizontalAlignment="Stretch">
+            <Image x:Name="CvImageContainer1" Stretch="Fill" />
+        </Viewbox>
+        <Viewbox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch">
+            <Image x:Name="CvImageContainer2" Stretch="Fill" />
+        </Viewbox>
+        <Viewbox Grid.Row="1" Grid.Column="2" HorizontalAlignment="Stretch">
+            <Image x:Name="CvImageContainer3" Stretch="Fill" />
+        </Viewbox>
+
+        <StatusBar Grid.Row="2" Grid.ColumnSpan="3" HorizontalAlignment="Stretch" Name="statusBar" VerticalAlignment="Bottom" Background="White">
+            <StatusBarItem Content="{Binding StatusText}" />
+        </StatusBar>
+    </Grid>
+</Window>
