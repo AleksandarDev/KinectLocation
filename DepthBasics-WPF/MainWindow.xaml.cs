@@ -1,10 +1,5 @@
-﻿//------------------------------------------------------------------------------
-// <copyright file="MainWindow.xaml.cs" company="Microsoft">
-//     Copyright (c) Microsoft Corporation.  All rights reserved.
-// </copyright>
-//------------------------------------------------------------------------------
-
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -27,7 +22,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
     /// <summary>
     /// Interaction logic for MainWindow
     /// </summary>
-    public partial class MainWindow : Window, INotifyPropertyChanged
+    public partial class MainWindow
     {
         /// <summary>
         /// Map depth range to byte range
@@ -47,7 +42,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         /// <summary>
         /// Description of the data contained in the depth frame
         /// </summary>
-        private FrameDescription depthFrameDescription = null;
+        private readonly FrameDescription depthFrameDescription = null;
             
         /// <summary>
         /// Bitmap to display
@@ -62,13 +57,9 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         /// <summary>
         /// Intermediate storage for frame data converted to color
         /// </summary>
-        private int depthFilled;
         private byte[] depthPixels = null;
+        private byte[] depthMovementLastPixels = null;
         private byte[] depthMovementPixels = null;
-        private byte[] maskBytes = null;
-
-        private const int depthHistorySize = 3;
-        private List<byte[]> depthHistory = new List<byte[]>();
 
         /// <summary>
         /// Current status text to display
@@ -95,9 +86,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
             // allocate space to put the pixels being received and converted
             this.depthPixels = new byte[this.depthFrameDescription.Width * this.depthFrameDescription.Height];
             this.depthMovementPixels = new byte[this.depthFrameDescription.Width * this.depthFrameDescription.Height];
-            for (int index = 0; index < depthHistorySize; index++)
-                this.depthHistory.Add(new byte[this.depthFrameDescription.Width * this.depthFrameDescription.Height]);
-            this.maskBytes = new byte[this.depthFrameDescription.Width * this.depthFrameDescription.Height];
+            this.depthMovementLastPixels = new byte[this.depthFrameDescription.Width * this.depthFrameDescription.Height];
 
             // create the bitmap to display
             this.depthBitmap = new WriteableBitmap(this.depthFrameDescription.Width, this.depthFrameDescription.Height, 96.0, 96.0, PixelFormats.Gray8, null);
@@ -128,29 +117,11 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         /// <summary>
         /// Gets the bitmap to display
         /// </summary>
-        public ImageSource ImageSource
-        {
-            get
-            {
-                return this.depthMovementBitmap;
-            }
-        }
+        public ImageSource ImageSource => this.depthMovementBitmap;
 
-        public ImageSource DepthImageSource
-        {
-            get
-            {
-                return this.depthBitmap;
-            }
-        }
+        public ImageSource DepthImageSource => this.depthBitmap;
 
-        public ImageSource ImageCvSource
-        {
-            get
-            {
-                return this.depthCvBitmap3;
-            }
-        }
+        public ImageSource ImageCvSource => this.depthCvBitmap3;
 
         /// <summary>
         /// Gets or sets the current status text to display
@@ -167,12 +138,7 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 if (this.statusText != value)
                 {
                     this.statusText = value;
-
-                    // notify any bound elements that the text has changed
-                    if (this.PropertyChanged != null)
-                    {
-                        this.PropertyChanged(this, new PropertyChangedEventArgs("StatusText"));
-                    }
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("StatusText"));
                 }
             }
         }
@@ -197,15 +163,14 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 this.kinectSensor = null;
             }
         }
+        
+        private bool isProcessingFrame = false;
 
-        /// <summary>
-        /// Handles the depth frame data arriving from the sensor
-        /// </summary>
-        /// <param name="sender">object sending the event</param>
-        /// <param name="e">event arguments</param>
         private void Reader_FrameArrived(object sender, DepthFrameArrivedEventArgs e)
         {
-            bool depthFrameProcessed = false;
+            if (isProcessingFrame)
+                return;
+            isProcessingFrame = true;
 
             using (DepthFrame depthFrame = e.FrameReference.AcquireFrame())
             {
@@ -213,29 +178,34 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 {
                     // the fastest way to process the body index data is to directly access 
                     // the underlying buffer
-                    using (Microsoft.Kinect.KinectBuffer depthBuffer = depthFrame.LockImageBuffer())
+                    using (var depthBuffer = depthFrame.LockImageBuffer())
                     {
                         // verify data and write the color data to the display bitmap
-                        if (((this.depthFrameDescription.Width * this.depthFrameDescription.Height) == (depthBuffer.Size / this.depthFrameDescription.BytesPerPixel)) &&
-                            (this.depthFrameDescription.Width == this.depthBitmap.PixelWidth) && (this.depthFrameDescription.Height == this.depthBitmap.PixelHeight))
+                        if (this.depthFrameDescription.Width * this.depthFrameDescription.Height ==
+                            depthBuffer.Size / this.depthFrameDescription.BytesPerPixel &&
+                            this.depthFrameDescription.Width == this.depthBitmap.PixelWidth &&
+                            this.depthFrameDescription.Height == this.depthBitmap.PixelHeight)
                         {
                             // Note: In order to see the full range of depth (including the less reliable far field depth)
                             // we are setting maxDepth to the extreme potential depth threshold
-                            ushort maxDepth = ushort.MaxValue;
-
-                            // If you wish to filter by reliable depth distance, uncomment the following line:
-                            //// maxDepth = depthFrame.DepthMaxReliableDistance
-                            
-                            this.ProcessDepthFrameData(depthBuffer.UnderlyingBuffer, depthBuffer.Size, depthFrame.DepthMinReliableDistance, maxDepth);
-                            depthFrameProcessed = true;
+                            const ushort maxDepth = ushort.MaxValue;
+                            var start = Stopwatch.StartNew();
+                            this.ProcessDepthFrameData(
+                                depthBuffer.UnderlyingBuffer,
+                                depthBuffer.Size,
+                                depthFrame.DepthMinReliableDistance,
+                                maxDepth);
+                            Debug.WriteLine(start.Elapsed);
                         }
+
+                        isProcessingFrame = false;
                     }
                 }
             }
 
-            if (depthFrameProcessed)
+            if (this.isVisualizationDepthImageEnabled)
             {
-                this.RenderDepthPixels();
+                this.VisualizeDepthImage();
             }
         }
 
@@ -249,160 +219,153 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         /// <param name="depthFrameDataSize">Size of the DepthFrame image data</param>
         /// <param name="minDepth">The minimum reliable depth value for the frame</param>
         /// <param name="maxDepth">The maximum reliable depth value for the frame</param>
-        private unsafe void ProcessDepthFrameData(IntPtr depthFrameData, uint depthFrameDataSize, ushort minDepth,
+        private unsafe void ProcessDepthFrameData(
+            IntPtr depthFrameData, 
+            uint depthFrameDataSize, 
+            ushort minDepth,
             ushort maxDepth)
         {
             // depth frame data is a 16 bit value
-            ushort* frameData = (ushort*) depthFrameData;
+            var frameData = (ushort*) depthFrameData;
+
+            // Copy old pixels 
+            //this.depthMovementLastPixels.CopyTo(this.depthMovementPixels, 0);
+            Buffer.BlockCopy(this.depthMovementPixels, 0, this.depthMovementLastPixels, 0, this.depthMovementLastPixels.Length);
 
             // convert depth to a visual representation
             Parallel.For(0, (int) (depthFrameDataSize / this.depthFrameDescription.BytesPerPixel), i =>
             {
                 // Get the depth for this pixel
-                ushort depth = frameData[i];
+                var depth = frameData[i];
 
                 // To convert to a byte, we're mapping the depth value to the byte range.
                 // Values outside the reliable depth range are mapped to 0 (black).
                 var newValue = (byte) (depth >= minDepth && depth <= maxDepth ? (depth / MapDepthToByte) : 0);
 
+                // Save for visualization
                 this.depthPixels[i] = newValue;
 
                 // Clear noise (smooth image)
                 const int noiseRemovalThr = 5;
-                if (depthFilled > 2 &&
-                    newValue < noiseRemovalThr && this.depthMovementPixels[i] > noiseRemovalThr)
-                    newValue = (byte) this.depthMovementPixels[i];
+                if (newValue < noiseRemovalThr &&
+                    this.depthMovementPixels[i] > noiseRemovalThr)
+                    newValue = this.depthMovementPixels[i];
 
-                // Filter out static objects
-                Func<byte, byte, bool> compareFrameDepth =
-                    (d1, d2) =>
-                    {
-                        return Math.Abs(d1 - d2) <= 3;
-                    };
-                if (this.depthFilled > depthHistorySize * 10)
-                {
-                    var argument = true;
-                    argument &= compareFrameDepth(this.depthMovementPixels[i], newValue);
-                    argument &= compareFrameDepth(this.depthMovementPixels[i], this.depthHistory[0][i]);
-                    argument &= compareFrameDepth(this.depthHistory[0][i], this.depthHistory[1][i]);
-                    argument &= compareFrameDepth(this.depthHistory[1][i], this.depthHistory[2][i]);
-
-                    if (!argument)
-                        maskBytes[i] = 255;
-                    else maskBytes[i] = 0;
-                }
-
-                // Copy from last frame
-                for (int j = depthHistorySize - 1; j > 0; j--)
-                    this.depthHistory[j][i] = this.depthHistory[j - 1][i];
-                this.depthHistory[0][i] = this.depthMovementPixels[i];
-
+                // Assign previous and current pixel
                 this.depthMovementPixels[i] = newValue;
             });
 
-            DateTime start = DateTime.Now;
-            
-            // Extract LoI points from new frame
-            using (var depthImage = this.GetFilledFullSize(maskBytes))
-            using (var downsampled = depthImage
-                .PyrDown()
-                .SmoothBlur(10, 10)
-                .PyrUp()
-                .ThresholdToZero(new Gray(50))
-                .Erode(3))
+            // Process movement to extract LoI points
+            using (var currentImage = this.GetFilledFullSize(this.depthMovementPixels))
+            using (var previousImage = this.GetFilledFullSize(this.depthMovementLastPixels))
+            using (var changesImage = this.GetEmptyFullSize())
             {
-                // Visualize downsampled image
-                if (isVisualizationDownsampledEnabled)
-                    this.VisualizeDownsampled(downsampled);
+                // Do the movement detection
+                CvInvoke.AbsDiff(currentImage, previousImage, changesImage);
 
-                // Extract countours
-                var hierachy = new Mat();
-                var contours = new VectorOfVectorOfPoint();
-                CvInvoke.FindContours(
-                    downsampled,
-                    contours,
-                    hierachy,
-                    RetrType.External,
-                    ChainApproxMethod.ChainApproxSimple);
-
-                // Cast to CvContours
-                var rects = ToCvContour(contours).ToList();
-
-                // Visualize contours
-                if (isVisualizeContoursEnabled)
-                    this.VisualizeContours(rects);
-
-                // Retrieve locations of interest points
-                var loiPoints = new List<LoiPoint>();
-                foreach (var rect in rects)
+                // Extract LoI points from new frame
+                using (var downsampled = changesImage
+                    .PyrDown()
+                    .SmoothBlur(10, 10)
+                    .PyrUp()
+                    .ThresholdBinary(new Gray(5), new Gray(255))
+                    .Erode(2))
                 {
-                    // Calculate center of contour
-                    var moments = CvInvoke.Moments(new VectorOfPoint(rect.Points));
-                    var x = moments.M10 / moments.M00;
-                    var y = moments.M01 / moments.M00;
-                    var contourCenter = new System.Drawing.Point((int)x, (int)y);
+                    // Visualize downsampled image
+                    if (isVisualizationDownsampledEnabled)
+                        this.VisualizeDownsampled(downsampled);
 
-                    // Ignore contours out of rect
-                    if (contourCenter.X <= rect.BoundingBox.Left ||
-                        contourCenter.Y <= rect.BoundingBox.Top ||
-                        contourCenter.X >= rect.BoundingBox.Right ||
-                        contourCenter.Y >= rect.BoundingBox.Bottom)
-                        continue;
+                    // Extract countours
+                    var hierachy = new Mat();
+                    var contours = new VectorOfVectorOfPoint();
+                    CvInvoke.FindContours(
+                        downsampled,
+                        contours,
+                        hierachy,
+                        RetrType.External,
+                        ChainApproxMethod.ChainApproxSimple);
 
-                    // Fill the contour and apply the contour mask to the depth image
-                    using (var contourCannyFull = this.GetFilledFullSize(this.depthMovementPixels))
-                    using (var contourCanny = contourCannyFull.Copy(rect.BoundingBox))
-                    using (var contourFlood = this.GetEmptyFullSize())
-                    using (var contourFloodMask = this.GetEmptyFullSize(2, 2))
+                    // Cast to CvContours
+                    var rects = ToCvContour(contours).ToList();
+
+                    // Visualize contours
+                    if (isVisualizationContoursEnabled)
+                        this.VisualizeContours(rects);
+
+                    // Retrieve locations of interest points
+                    var loiPoints = new List<LoiPoint>();
+                    foreach (var rect in rects)
                     {
-                        Rectangle contourFloodRect;
-                        CvInvoke.DrawContours(
-                            contourFlood,
-                            new VectorOfVectorOfPoint(new VectorOfPoint(rect.Points)),
-                            -1,
-                            new MCvScalar(255));
-                        CvInvoke.FloodFill(
-                            contourFlood,
-                            contourFloodMask,
-                            contourCenter,
-                            new MCvScalar(255),
-                            out contourFloodRect,
-                            new MCvScalar(0),
-                            new MCvScalar(0));
+                        // Ignore small rectangles
+                        if (rect.BoundingBox.Width < 10 &&
+                            rect.BoundingBox.Height < 10)
+                            continue;
 
-                        // Apply contour and movement mask
-                        using (var contourFloodBound = contourFlood.Copy(rect.BoundingBox))
-                        using (var contourCannyBound = contourCanny.Copy(contourFloodBound))
-                        using (var maskMask = depthImage.Copy(rect.BoundingBox))
-                        using (var contourCannyMaskedBound = contourCannyBound.Copy(maskMask))
+                        // Calculate center of contour
+                        var moments = CvInvoke.Moments(new VectorOfPoint(rect.Points));
+                        var x = moments.M10 / moments.M00;
+                        var y = moments.M01 / moments.M00;
+                        var contourCenter = new System.Drawing.Point((int) x, (int) y);
+
+                        // Ignore contours out of rect
+                        if (contourCenter.X <= rect.BoundingBox.Left ||
+                            contourCenter.Y <= rect.BoundingBox.Top ||
+                            contourCenter.X >= rect.BoundingBox.Right ||
+                            contourCenter.Y >= rect.BoundingBox.Bottom)
+                            continue;
+
+                        // Fill the contour and apply the contour mask to the depth image
+                        using (var contourCannyFull = this.GetFilledFullSize(this.depthMovementPixels))
+                        using (var contourCanny = contourCannyFull.Copy(rect.BoundingBox))
+                        using (var contourFlood = this.GetEmptyFullSize())
+                        using (var contourFloodMask = this.GetEmptyFullSize(2, 2))
                         {
-                            // Find min depth point of contour canny
-                            var contourMinDepth =
-                                contourCannyMaskedBound.Bytes.Min(b => b > 70 ? b : (byte)255);
+                            Rectangle contourFloodRect;
+                            CvInvoke.DrawContours(
+                                contourFlood,
+                                new VectorOfVectorOfPoint(new VectorOfPoint(rect.Points)),
+                                -1,
+                                new MCvScalar(255));
+                            CvInvoke.FloodFill(
+                                contourFlood,
+                                contourFloodMask,
+                                contourCenter,
+                                new MCvScalar(255),
+                                out contourFloodRect,
+                                new MCvScalar(0),
+                                new MCvScalar(0));
 
-                            // Save the location with depth data
-                            var loiPoint = new LoiPoint(contourCenter, contourMinDepth);
-                            loiPoints.Add(loiPoint);
+                            // Apply contour and movement mask
+                            using (var contourFloodBound = contourFlood.Copy(rect.BoundingBox))
+                            using (var contourCannyBound = contourCanny.Copy(contourFloodBound))
+                            using (var maskMask = changesImage.Copy(rect.BoundingBox))
+                            using (var contourCannyMaskedBound = contourCannyBound.Copy(maskMask))
+                            {
+                                // Find min depth point of contour canny
+                                var contourMinDepth =
+                                    contourCannyMaskedBound.Bytes.Min(b => b > 70 ? b : (byte) 255);
 
-                            // Visualize LoI point
-                            if (isVisualizationLoiPointEnabled)
-                                this.VisualizeLoiPoint(contourCannyMaskedBound, rect, loiPoint);
+                                // Save the location with depth data
+                                var loiPoint = new LoiPoint(contourCenter, contourMinDepth);
+                                loiPoints.Add(loiPoint);
+
+                                // Visualize LoI point
+                                if (isVisualizationLoiPointEnabled)
+                                    this.VisualizeLoiPoint(contourCannyMaskedBound, rect, loiPoint);
+                            }
+
                         }
 
+                        this.ProcessRawLocationsOfInterest(loiPoints);
                     }
-
-                    this.ProcessRawLocationsOfInterest(loiPoints);
                 }
             }
-
-            System.Diagnostics.Debug.WriteLine(DateTime.Now - start);
-
-            this.depthFilled++;
         }
 
+        private bool isVisualizationDepthImageEnabled = true;
         private bool isVisualizationDownsampledEnabled = false;
         private bool isVisualizationLoiPointEnabled = false;
-        private bool isVisualizeContoursEnabled = false;
+        private bool isVisualizationContoursEnabled = false;
 
         private void VisualizeDownsampled(Image<Gray, byte> downsampled)
         {
@@ -491,10 +454,10 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 .Select(contour => new CvContour(contour));
         }
 
-        public void ProcessRawLocationsOfInterest(IEnumerable<LoiPoint> locations)
+        public void ProcessRawLocationsOfInterest(IEnumerable<ILoiPoint> locations)
         {
             foreach (var location in locations)
-                System.Diagnostics.Debug.WriteLine($"Got LoI: {location.Location} ({location.Depth})");
+                Debug.WriteLine($"Got LoI: {location.Location} ({location.Depth})");
         }
 
         private Image<Gray, byte> GetFilledFullSize(byte[] data)
@@ -561,41 +524,13 @@ namespace Microsoft.Samples.Kinect.DepthBasics
                 return true;
             return false;
         }
-
-        /// <summary>
-        /// Renders color pixels into the writeableBitmap.
-        /// </summary>
-        private void RenderDepthPixels()
+        
+        private void VisualizeDepthImage()
         {
-            //this.depthBitmap.WritePixels(
-            //    new Int32Rect(0, 0, this.depthBitmap.PixelWidth, this.depthBitmap.PixelHeight),
-            //    this.depthMovementPixels,
-            //    this.depthBitmap.PixelWidth,
-            //    0);
-
-            // Combine masks
-            var imagePixels = new byte[this.depthMovementPixels.Length * 3];
-            for (int i = 0; i < this.depthMovementPixels.Length; i++)
-            {
-                var val = this.maskBytes[i] > 0 ? (byte) 255 : this.depthMovementPixels[i];
-                imagePixels[i * 3 + 0] = val;
-                imagePixels[i * 3 + 1] = this.depthMovementPixels[i];
-                imagePixels[i * 3 + 2] = this.depthMovementPixels[i];
-                //imagePixels[i * 3 + 0] = val;
-                //imagePixels[i * 3 + 1] = val;
-                //imagePixels[i * 3 + 2] = val;
-            }
-
             this.depthBitmap.WritePixels(
                 new Int32Rect(0, 0, this.depthBitmap.PixelWidth, this.depthBitmap.PixelHeight),
                 this.depthPixels,
                 this.depthBitmap.PixelWidth,
-                0);
-
-            this.depthMovementBitmap.WritePixels(
-                new Int32Rect(0, 0, this.depthBitmap.PixelWidth, this.depthBitmap.PixelHeight),
-                imagePixels,
-                this.depthBitmap.PixelWidth*3,
                 0);
         }
 
