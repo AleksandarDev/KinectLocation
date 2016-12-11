@@ -21,5 +21,7 @@ namespace KinectLocation
         int FrameWidth { get; set; }
 
         int FrameHeight { get; set; }
+
+        byte[] CurrentDepthFrame { get; }
     }
 }

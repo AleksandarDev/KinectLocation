@@ -35,28 +35,32 @@ namespace Microsoft.Samples.Kinect.DepthBasics
             // initialize the components (controls) of the window
             this.InitializeComponent();
 
-            this.locationHandler = new LocationHandlerDepthVisualizer();
+            this.locationHandler = new LocationHandler();
             this.locationHandler.RegisterVolume(new VoiBox(
                 "In Kitchen", 0, 0, 255, new Size(190, 800), 90));
+            this.locationHandler.RegisterVolume(new VoiBox(
+                "In Bathroom", 220, 0, 255, new Size(40, 800), 60));
             this.locationHandler.RegisterVolume(new VoiBox(
                 "In Hall", 190, 0, 255, new Size(90, 800), 90));
             this.locationHandler.RegisterVolume(new VoiBox(
                 "In Bedroom", 270, 0, 190, new Size(90, 800), 40));
             this.locationHandler.RegisterVolume(new VoiBox(
-                "In Livingroom", 0, 0, 150, new Size(400, 800), 130));
+                "In Livingroom", 0, 0, 140, new Size(400, 800), 120));
+            this.locationHandler.RegisterVolume(new VoiBox(
+                "On Terrace", 400, 0, 90, new Size(150, 800), 80));
             this.locationHandler.OnLocations+= LocationHandlerOnOnLocations;
 
             this.kinectDepthLocationProcessor = new KinectDepthLocationProcessor(this.locationHandler);
             this.kinectDepthLocationProcessor.Start();
             this.kinectDepthLocationProcessor.IsVisualizationDepthImageEnabled = true;
-            this.kinectDepthLocationProcessor.IsVisualizationDownsampledEnabled = true;
-            this.kinectDepthLocationProcessor.IsVisualizationContoursEnabled = true;
-            this.kinectDepthLocationProcessor.IsVisualizationLoiPointsEnabled = true;
+            //this.kinectDepthLocationProcessor.IsVisualizationDownsampledEnabled = true;
+            //this.kinectDepthLocationProcessor.IsVisualizationContoursEnabled = true;
+            //this.kinectDepthLocationProcessor.IsVisualizationLoiPointsEnabled = true;
             this.kinectDepthLocationProcessor.PropertyChanged += KinectDepthLocationProcessorOnPropertyChanged;
         }
 
         private int lastLocationsPointer = 0;
-        private string[] lastLocations = new string[8];
+        private string[] lastLocations = new string[4];
 
         private void LocationHandlerOnOnLocations(object sender, LocationHandlerLocationAvailableEventArgs args)
         {
@@ -67,18 +71,11 @@ namespace Microsoft.Samples.Kinect.DepthBasics
             if (!locationsList.Any())
                 return;
 
-            foreach (var loi in locationsList)
-            {
-                this.lastLocations[this.lastLocationsPointer++] = loi.Id;
-                this.lastLocationsPointer = this.lastLocationsPointer % this.lastLocations.Length;
-            }
+            this.lastLocations[this.lastLocationsPointer++] = locationsList.First().Id;
+            this.lastLocationsPointer = this.lastLocationsPointer % this.lastLocations.Length;
 
             var location = lastLocations.GroupBy(l => l).OrderByDescending(g => g.Count()).FirstOrDefault();
             this.LocationIdTextBlock.Text = location?.Key;
-            //this.LocationIdTextBlock.Text = locationsList
-            //    .Select(l => l.Id)
-            //    .Distinct()
-            //    .Aggregate(string.Empty, (c, s) => c + ", " + s);
         }
 
         private void KinectDepthLocationProcessorOnPropertyChanged(object sender, PropertyChangedEventArgs propertyChangedEventArgs)
@@ -96,9 +93,6 @@ namespace Microsoft.Samples.Kinect.DepthBasics
         private void RefreshDepthImage()
         {
             this.CvImageContainer1.Source = this.kinectDepthLocationProcessor.VisualizationDepthImage;
-
-            //this.CvImageContainer5.Source = (this.locationHandler as LocationHandlerDepthVisualizer).VisualizeLocations(
-            //    this.kinectDepthLocationProcessor.DepthData, this.kinectDepthLocationProcessor.FrameWidth).ToBitmapSource();
         }
 
         private void RefreshDownsampledImage()

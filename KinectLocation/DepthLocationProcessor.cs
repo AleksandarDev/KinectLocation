@@ -320,6 +320,8 @@ namespace KinectLocation
             }
         }
 
+        public byte[] CurrentDepthFrame => this.currentFrame;
+
         #region INotifyPropertyChanged implementation
 
         public event PropertyChangedEventHandler PropertyChanged;

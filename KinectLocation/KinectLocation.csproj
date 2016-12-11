@@ -106,6 +106,7 @@
     <Compile Include="IVoiBox.cs" />
     <Compile Include="KinectDepthLocationProcessor.cs" />
     <Compile Include="LocationHandler.cs" />
+    <Compile Include="LocationHandlerDepthVisualizer.cs" />
     <Compile Include="LocationHandlerLocationAvailableEventArgs.cs" />
     <Compile Include="LocationHandlerLocationAvailableEventHandler.cs" />
     <Compile Include="Loi.cs" />
