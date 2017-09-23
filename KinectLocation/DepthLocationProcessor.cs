@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
@@ -66,7 +67,7 @@ namespace KinectLocation
             // Process the locations from the frame
             this.ProcessFramesForLocation();
         }
-
+        
         private void ProcessFramesForLocation()
         {
             // Process movement to extract LoI points
@@ -83,15 +84,16 @@ namespace KinectLocation
                 using (var downsampled = changesImage
                     .ThresholdBinary(new Gray(5), new Gray(255))
                     .PyrDown()
-                    .SmoothBlur(15, 15)
+                    .SmoothGaussian(17)
                     .PyrUp()
                     .ThresholdBinary(new Gray(5), new Gray(255))
-                    .Erode(2))
+                    .Erode(1)
+                    )
                 {
                     // Visualize downsampled image
                     if (this.IsVisualizationDownsampledEnabled)
                         this.VisualizeDownsampled(downsampled);
-
+                    
                     // Extract countours
                     CvInvoke.FindContours(
                         downsampled,
@@ -128,11 +130,11 @@ namespace KinectLocation
                         var contourCenter = new Point((int)x, (int)y);
 
                         // Ignore contours out of rect
-                        if (contourCenter.X <= rect.BoundingBox.Left ||
-                            contourCenter.Y <= rect.BoundingBox.Top ||
-                            contourCenter.X >= rect.BoundingBox.Right ||
-                            contourCenter.Y >= rect.BoundingBox.Bottom)
-                            continue;
+                        //if (contourCenter.X <= rect.BoundingBox.Left ||
+                        //    contourCenter.Y <= rect.BoundingBox.Top ||
+                        //    contourCenter.X >= rect.BoundingBox.Right ||
+                        //    contourCenter.Y >= rect.BoundingBox.Bottom)
+                        //    continue;
 
                         // Fill the contour and apply the contour mask to the depth image
                         using (var contourCanny = currentImage.Copy(rect.BoundingBox))
@@ -140,45 +142,85 @@ namespace KinectLocation
                         using (var contourFloodMask = this.GetEmptyFullSize(2, 2))
                         using (var contourFloodPoints = new VectorOfVectorOfPoint(new VectorOfPoint(rect.Points)))
                         {
-                            Rectangle contourFloodRect;
-                            CvInvoke.DrawContours(
-                                contourFlood,
-                                contourFloodPoints,
-                                -1,
-                                new MCvScalar(255));
-                            CvInvoke.FloodFill(
-                                contourFlood,
-                                contourFloodMask,
-                                contourCenter,
-                                new MCvScalar(255),
-                                out contourFloodRect,
-                                new MCvScalar(0),
-                                new MCvScalar(0));
-
-                            // Apply contour and movement mask
-                            using (var contourFloodBound = contourFlood.Copy(rect.BoundingBox))
-                            using (var contourCannyBound = contourCanny.Copy(contourFloodBound))
-                            using (var maskMask = changesImage.Copy(rect.BoundingBox).ThresholdBinary(new Gray(20), new Gray(255)))
-                            using (var contourCannyMaskedBound = contourCannyBound.Copy(maskMask))
+                            // Group by depth (rounded to 5 units) and
+                            // pick min depth with most area
+                            ConcurrentDictionary<int, int> depthGroups = new ConcurrentDictionary<int, int>();
+                            Parallel.For(0, contourCanny.Rows, row =>
                             {
-                                // Find min depth point of contour canny
-                                var contourMinDepth =
-                                    contourCannyMaskedBound.Bytes.Min(b => b > 20 ? b : (byte)255);
+                                for (int columnIndex = 0; columnIndex < contourCanny.Cols; columnIndex++)
+                                {
+                                    var sourceX = columnIndex + rect.BoundingBox.X;
+                                    var sourceY = row + rect.BoundingBox.Y;
+                                    var value = (int)((1.0/Math.Sqrt(Math.Pow(x - sourceX, 2) + Math.Pow(y - sourceY, 2)))*30);
+                                    var depth = contourCanny.Data[row, columnIndex, 0];
+                                    var roundedDepth = (int) Math.Round(depth / 5.0) * 5;
+                                    if (!depthGroups.ContainsKey(roundedDepth))
+                                        depthGroups.AddOrUpdate(roundedDepth, i => value, (i, i1) => i1 + value);
+                                    else depthGroups[roundedDepth] = depthGroups[roundedDepth] + value;
+                                }
+                            });
+                            foreach (var keyValuePair in depthGroups.OrderByDescending(kvp => kvp.Key + kvp.Value))
+                            {
+                                Console.WriteLine($"{keyValuePair.Key}:\t{keyValuePair.Value}\t{keyValuePair.Key + keyValuePair.Value}");
+                            }
+                            var interestingDepth = depthGroups.OrderByDescending(kvp => kvp.Value).FirstOrDefault().Key;
+                            Console.WriteLine("-------- " + interestingDepth);
 
-                                // Save the location with depth data
-                                var loiPoint = new LoiPoint(contourCenter, contourMinDepth);
-                                loiPoints.Add(loiPoint);
-                                
-                                // Visualize LoI point
-                                if (this.IsVisualizationLoiPointsEnabled)
-                                    this.VisualizeLoiPoint(contourCannyMaskedBound, rect, loiPoint);
+                            var loiPoint = new LoiPoint(contourCenter, (byte)interestingDepth);
+                            loiPoints.Add(loiPoint);
+
+                            if (interestingDepth > 200)
+                            {
+                                using (var contourFloodBound = currentImage.Copy(rect.BoundingBox))
+                                using (var contourCannyBound = contourCanny.Copy(contourFloodBound))
+                                using (var maskMask = changesImage.Copy(rect.BoundingBox)
+                                    .ThresholdBinary(new Gray(20), new Gray(255)))
+                                using (var contourCannyMaskedBound = contourCannyBound.Copy(maskMask))
+                                {
+                                    if (this.IsVisualizationLoiPointsEnabled)
+                                        this.VisualizeLoiPoint(contourCannyMaskedBound, rect, loiPoint);
+                                }
                             }
 
-                        }
+                            //Rectangle contourFloodRect;
+                            //CvInvoke.DrawContours(
+                            //    contourFlood,
+                            //    contourFloodPoints,
+                            //    -1,
+                            //    new MCvScalar(255));
+                            //CvInvoke.FloodFill(
+                            //    contourFlood,
+                            //    contourFloodMask,
+                            //    contourCenter,
+                            //    new MCvScalar(255),
+                            //    out contourFloodRect,
+                            //    new MCvScalar(0),
+                            //    new MCvScalar(0));
 
-                        // Hand the LoI points to locations handler
-                        this.locationHandler.ProcessRawLoiPoints(loiPoints);
+                            // Apply contour and movement mask
+                            //using (var contourFloodBound = contourFlood.Copy(rect.BoundingBox))
+                            //using (var contourCannyBound = contourCanny.Copy(contourFloodBound))
+                            //using (var maskMask = changesImage.Copy(rect.BoundingBox).ThresholdBinary(new Gray(20), new Gray(255)))
+                            //using (var contourCannyMaskedBound = contourCannyBound.Copy(maskMask))
+                            //{
+                            //    // Find min depth point of contour canny
+                            //    //var contourMinDepth =
+                            //    //    contourCannyMaskedBound.Bytes.Min(b => b > 20 ? b : (byte)255);
+
+                            //    // Save the location with depth data
+                            //    //var loiPoint = new LoiPoint(contourCenter, contourMinDepth);
+                            //    //loiPoints.Add(loiPoint);
+
+                            //    // Visualize LoI point
+                            //    //if (this.IsVisualizationLoiPointsEnabled)
+                            //    //    this.VisualizeLoiPoint(contourCannyMaskedBound, rect, loiPoint);
+                            //}
+
+                        }
                     }
+
+                    // Hand the LoI points to locations handler
+                    this.locationHandler.ProcessRawLoiPoints(loiPoints);
                 }
             }
         }
@@ -197,7 +239,7 @@ namespace KinectLocation
                 for (var j = 1; j < contourCanny.Width; j++)
                 {
                     // Ignore if point mot of required depth
-                    if (contourCanny.Data[i, j, 0] != loiPoint.Depth)
+                    if ((int)((contourCanny.Data[i, j, 0] / 5.0)*5.0) != loiPoint.Depth)
                         continue;
 
                     contourMinDepthPixelPoint = new Point(j, i);
